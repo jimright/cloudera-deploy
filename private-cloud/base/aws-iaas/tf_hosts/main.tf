@@ -43,7 +43,7 @@ resource "aws_instance" "pvc_base" {
   subnet_id                   = var.subnet_ids[count.index % length(var.subnet_ids)]
   associate_public_ip_address = var.public_ip
 
-  security_groups = var.security_groups
+  vpc_security_group_ids      = var.security_groups
 
   root_block_device {
     delete_on_termination = var.root_volume.delete_on_termination
