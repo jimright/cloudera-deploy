@@ -117,6 +117,11 @@
   gather_facts: yes
   become: yes
   tags: freeipa
+  handlers:
+    - name: restart sssd
+      ansible.builtin.service:
+        name: sssd
+        state: restarted  
   tasks:
     - name: Register host with local FreeIPA server
       ansible.builtin.import_role:
@@ -143,6 +148,7 @@
       vars:
         entries:
           krb5_ccname_template: 'FILE:/tmp/krb5cc_%U_XXXXXX'
+      notify: restart sssd
 
     - name: Comment default_ccache_name in krb5.conf.d
       ansible.builtin.replace:
@@ -154,11 +160,7 @@
       loop:
         - '^\[libdefaults\]'
         - '^\s+default_ccache_name = KCM'
-
-    - name: Restart the SSSD service
-      ansible.builtin.service:
-        name: sssd
-        state: restarted
+      notify: restart sssd
         
 - name: Establish supporting services resources
   hosts: deployment
