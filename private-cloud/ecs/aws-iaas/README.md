@@ -1,6 +1,22 @@
 # PvC Base Cluster on AWS IaaS
 
-> Constructs a CDP Private Cloud Base cluster running on AWS IaaS.
+> Constructs CDP Private Cloud Base and ECS clusters cluster running on AWS IaaS.
+
+A summary of the infrastructure and cluster configuration is given below.
+
+| Item                           | |
+| ------------------------------ | ------ |
+| _**PvC Base Version**_         | 7.1.9 |
+| _**Cloudera Manager Version**_ | 7.11.3 |
+| _**ECS Version**_              | 1.5.3 |
+| _**DNS & Directory Service**_  | FreeIPA server deployed as part of automation |
+| _**Infrastructure Platform**_  | AWS IaaS |
+| _**Num Nodes Created**_        | 4 |
+| _FreeIPA Server Nodes_         | 1 |
+| _Base Master Nodes_            | 1 |
+| _Base Worker Nodes_            | 2 |
+| _ECS Master Nodes_             | 1 |
+| _ECS Worker Nodes_             | 3 |
 
 ## Known Issues
 
