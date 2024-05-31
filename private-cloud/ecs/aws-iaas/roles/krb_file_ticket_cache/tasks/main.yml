@@ -1,0 +1,27 @@
+---
+- name: Update the SSSD for caching of Kerberos ticket as files
+  community.general.ini_file:
+    path: /etc/sssd/sssd.conf
+    section: "domain/{{ sssd_domain }}"
+    option: "{{ sssd.key }}"
+    value: "{{ sssd.value | string }}"
+  loop: "{{ entries | dict2items }}"
+  loop_control:
+    loop_var: sssd
+    label: "{{ sssd.key }}"
+  vars:
+    entries:
+      krb5_ccname_template: 'FILE:/tmp/krb5cc_%U_XXXXXX'
+  notify: restart sssd
+
+- name: Comment default_ccache_name in krb5.conf.d
+  ansible.builtin.replace:
+    dest: /etc/krb5.conf.d/kcm_default_ccache
+    regexp: '({{ krb_item }})'
+    replace: '# \1'
+  loop_control:
+    loop_var: krb_item
+  loop:
+    - '^\[libdefaults\]'
+    - '^\s+default_ccache_name = KCM'
+  notify: restart sssd
