@@ -1,4 +1,4 @@
-# PvC Base Cluster on AWS IaaS
+# PvC Base and ECS on AWS IaaS
 
 > Constructs CDP Private Cloud Base and ECS clusters cluster running on AWS IaaS.
 
