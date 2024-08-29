@@ -143,13 +143,14 @@
         name: krb_file_ticket_cache
       vars:
         sssd_domain: "{{ domain }}"
-        
-- name: Establish supporting services resources
-  hosts: deployment
-  gather_facts: no
-  become: yes
-  tags: prereq
-  tasks:
-    - name: Establish additional cluster host requirements
-      ansible.builtin.import_role:
-        name: cluster_reqs
+
+# Functionality in AMI
+# - name: Establish supporting services resources
+#   hosts: deployment
+#   gather_facts: no
+#   become: yes
+#   tags: prereq
+#   tasks:
+#     - name: Establish additional cluster host requirements
+#       ansible.builtin.import_role:
+#         name: cluster_reqs

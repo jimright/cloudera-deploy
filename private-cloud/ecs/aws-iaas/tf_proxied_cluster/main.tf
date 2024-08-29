@@ -36,13 +36,65 @@ provider "aws" {
 }
 
 locals {
-  # RedHat 8.6
-  ami_user   = "ec2-user"
-  ami_owners = ["309956199498"]
-  ami_filters = {
-    name         = ["RHEL-8.6*"]
-    architecture = ["x86_64"]
+  bastion_image = {
+    # GOES FreeIPA client image
+    ami_user   = "ec2-user"
+    ami_owners = ["981304421142"]
+    ami_filters = {
+      name         = ["GOES-RHEL-8.6-pvc-freeipa-client-reqs"]
+      architecture = ["x86_64"]
+    }
   }
+  freeipa_server_image = {
+    # GOES FreeIPA server image
+    ami_user   = "ec2-user"
+    ami_owners = ["981304421142"]
+    ami_filters = {
+      name         = ["GOES-RHEL-8.6-pvc-freeipa-server-reqs"]
+      architecture = ["x86_64"]
+    }
+  }
+
+  pvc_cluster_cm_image = {
+    # GOES FreeIPA client image
+    ami_user   = "ec2-user"
+    ami_owners = ["981304421142"]
+    ami_filters = {
+      name         = ["GOES-RHEL-8.6-pvc-base-cm-server-and-db-base"]
+      architecture = ["x86_64"]
+    }
+  }
+
+  pvc_cluster_base_worker_image = {
+    # GOES FreeIPA client image
+    ami_user   = "ec2-user"
+    ami_owners = ["981304421142"]
+    ami_filters = {
+      name         = ["GOES-RHEL-8.6-pvc-int-cm-packages-base"]
+      architecture = ["x86_64"]
+    }
+  }
+
+  pvc_cluster_ecs_master_image = {
+    # GOES FreeIPA client image
+    ami_user   = "ec2-user"
+    ami_owners = ["981304421142"]
+    ami_filters = {
+      name         = ["GOES-RHEL-8.6-pvc-int-cm-packages-ecs"]
+      architecture = ["x86_64"]
+    }
+  }
+
+  pvc_cluster_ecs_worker_image = {
+    # GOES FreeIPA client image
+    ami_user   = "ec2-user"
+    ami_owners = ["981304421142"]
+    ami_filters = {
+      name         = ["GOES-RHEL-8.6-pvc-int-cm-packages-ecs"]
+      architecture = ["x86_64"]
+    }
+  }
+
   domain   = var.domain != "" ? var.domain : "${var.prefix}.pvc-base.cldr.example"
   vpc_name = var.vpc_name != "" ? var.vpc_name : "${var.prefix}-pvc-base"
   igw_name = var.igw_name != "" ? var.igw_name : "${var.prefix}-pvc-base-igw"
@@ -50,12 +102,89 @@ locals {
 
 # ------- AMI -------
 
-data "aws_ami" "pvc_base" {
-  owners      = local.ami_owners
+# Bastion image
+data "aws_ami" "bastion_image" {
+  owners      = local.bastion_image.ami_owners
   most_recent = true
 
   dynamic "filter" {
-    for_each = local.ami_filters
+    for_each = local.bastion_image.ami_filters
+
+    content {
+      name   = filter.key
+      values = filter.value
+    }
+  }
+}
+
+# FreeIPA Server image
+data "aws_ami" "freeipa_server_image" {
+  owners      = local.freeipa_server_image.ami_owners
+  most_recent = true
+
+  dynamic "filter" {
+    for_each = local.freeipa_server_image.ami_filters
+
+    content {
+      name   = filter.key
+      values = filter.value
+    }
+  }
+}
+
+# PVC Cluster images
+# ...CM / DB
+data "aws_ami" "pvc_cluster_cm_image" {
+  owners      = local.pvc_cluster_cm_image.ami_owners
+  most_recent = true
+
+  dynamic "filter" {
+    for_each = local.pvc_cluster_cm_image.ami_filters
+
+    content {
+      name   = filter.key
+      values = filter.value
+    }
+  }
+}
+
+# ...baser worker
+data "aws_ami" "pvc_cluster_base_worker_image" {
+  owners      = local.pvc_cluster_base_worker_image.ami_owners
+  most_recent = true
+
+  dynamic "filter" {
+    for_each = local.pvc_cluster_base_worker_image.ami_filters
+
+    content {
+      name   = filter.key
+      values = filter.value
+    }
+  }
+}
+
+# ...ECS Master
+data "aws_ami" "pvc_cluster_ecs_master_image" {
+  owners      = local.pvc_cluster_ecs_master_image.ami_owners
+  most_recent = true
+
+  dynamic "filter" {
+    for_each = local.pvc_cluster_ecs_master_image.ami_filters
+
+    content {
+      name   = filter.key
+      values = filter.value
+    }
+  }
+}
+
+# ...ECS Worker
+data "aws_ami" "pvc_cluster_ecs_worker_image" {
+  owners      = local.pvc_cluster_ecs_worker_image.ami_owners
+  most_recent = true
+
+  dynamic "filter" {
+    for_each = local.pvc_cluster_ecs_worker_image.ami_filters
 
     content {
       name   = filter.key
@@ -116,7 +245,7 @@ module "bastion" {
 
   prefix       = var.prefix
   name         = "${var.prefix}-bastion"
-  image_id     = data.aws_ami.pvc_base.image_id
+  image_id     = data.aws_ami.bastion_image.image_id
   vpc_id       = aws_vpc.pvc_base.id
   subnet_id    = module.cluster_network.public_subnets[0].id
   ssh_key_pair = aws_key_pair.pvc_base.key_name
@@ -158,11 +287,11 @@ resource "aws_vpc_security_group_egress_rule" "cluster" {
 
 module "masters" {
   source     = "../tf_hosts"
-  depends_on = [aws_key_pair.pvc_base, data.aws_ami.pvc_base]
+  depends_on = [aws_key_pair.pvc_base]
 
   prefix          = var.prefix
   name            = "${var.prefix}-master"
-  image_id        = data.aws_ami.pvc_base.image_id
+  image_id        = data.aws_ami.pvc_cluster_cm_image.image_id
   instance_type   = "m5.4xlarge"
   ssh_key_pair    = aws_key_pair.pvc_base.key_name
   subnet_ids      = module.cluster_network.private_subnets[*].id
@@ -176,12 +305,12 @@ module "masters" {
 
 module "workers" {
   source     = "../tf_hosts"
-  depends_on = [aws_key_pair.pvc_base, data.aws_ami.pvc_base]
+  depends_on = [aws_key_pair.pvc_base]
 
   prefix          = var.prefix
   name            = "${var.prefix}-worker"
   quantity        = 2
-  image_id        = data.aws_ami.pvc_base.image_id
+  image_id        = data.aws_ami.pvc_cluster_base_worker_image.image_id
   instance_type   = "c5.2xlarge"
   ssh_key_pair    = aws_key_pair.pvc_base.key_name
   subnet_ids      = module.cluster_network.private_subnets[*].id
@@ -195,11 +324,11 @@ module "workers" {
 
 module "ecs-masters" {
   source     = "../tf_hosts"
-  depends_on = [aws_key_pair.pvc_base, data.aws_ami.pvc_base]
+  depends_on = [aws_key_pair.pvc_base]
 
   prefix          = var.prefix
   name            = "${var.prefix}-ecs-master"
-  image_id        = data.aws_ami.pvc_base.image_id
+  image_id        = data.aws_ami.pvc_cluster_ecs_master_image.image_id
   instance_type   = "m5.4xlarge"
   ssh_key_pair    = aws_key_pair.pvc_base.key_name
   subnet_ids      = module.cluster_network.private_subnets[*].id
@@ -213,12 +342,12 @@ module "ecs-masters" {
 
 module "ecs-workers" {
   source     = "../tf_hosts"
-  depends_on = [aws_key_pair.pvc_base, data.aws_ami.pvc_base]
+  depends_on = [aws_key_pair.pvc_base]
 
   prefix          = var.prefix
   name            = "${var.prefix}-ecs-worker"
   quantity        = 3
-  image_id        = data.aws_ami.pvc_base.image_id
+  image_id        = data.aws_ami.pvc_cluster_ecs_worker_image.image_id
   instance_type   = "c5.2xlarge"
   ssh_key_pair    = aws_key_pair.pvc_base.key_name
   subnet_ids      = module.cluster_network.private_subnets[*].id
@@ -232,11 +361,11 @@ module "ecs-workers" {
 
 module "freeipa" {
   source     = "../tf_hosts"
-  depends_on = [aws_key_pair.pvc_base, data.aws_ami.pvc_base]
+  depends_on = [aws_key_pair.pvc_base]
 
   prefix          = var.prefix
   name            = "${var.prefix}-freeipa"
-  image_id        = data.aws_ami.pvc_base.image_id
+  image_id        = data.aws_ami.freeipa_server_image.image_id
   instance_type   = "m5.large" # TODO Look up via region
   ssh_key_pair    = aws_key_pair.pvc_base.key_name
   subnet_ids      = module.cluster_network.private_subnets[*].id
@@ -320,7 +449,7 @@ resource "ansible_group" "deployment" {
     ansible_group.freeipa.name
   ]
   variables = {
-    ansible_ssh_common_args = "-o ProxyCommand='ssh -i {{ lookup('ansible.builtin.env', 'SSH_PRIVATE_KEY_FILE') }} -o User=${local.ami_user} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p -q ${module.bastion.host.public_ip}'"
+    ansible_ssh_common_args = "-o ProxyCommand='ssh -i {{ lookup('ansible.builtin.env', 'SSH_PRIVATE_KEY_FILE') }} -o User=${local.bastion_image.ami_user} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p -q ${module.bastion.host.public_ip}'"
   }
 }
 
@@ -337,7 +466,7 @@ resource "ansible_host" "masters" {
 
   variables = {
     ansible_host = each.value.private_ip
-    ansible_user = local.ami_user
+    ansible_user = local.pvc_cluster_cm_image.ami_user
   }
 }
 
@@ -352,7 +481,7 @@ resource "ansible_host" "workers" {
 
   variables = {
     ansible_host = each.value.private_ip
-    ansible_user = local.ami_user
+    ansible_user = local.pvc_cluster_base_worker_image.ami_user
   }
 }
 
@@ -367,7 +496,7 @@ resource "ansible_host" "ecs-masters" {
 
   variables = {
     ansible_host = each.value.private_ip
-    ansible_user = local.ami_user
+    ansible_user = local.pvc_cluster_ecs_master_image.ami_user
   }
 }
 
@@ -382,7 +511,7 @@ resource "ansible_host" "ecs-workers" {
 
   variables = {
     ansible_host = each.value.private_ip
-    ansible_user = local.ami_user
+    ansible_user = local.pvc_cluster_ecs_worker_image.ami_user
   }
 }
 
@@ -397,7 +526,7 @@ resource "ansible_host" "freeipa" {
 
   variables = {
     ansible_host = each.value.private_ip
-    ansible_user = local.ami_user
+    ansible_user = local.freeipa_server_image.ami_user
   }
 }
 
@@ -410,6 +539,6 @@ resource "ansible_host" "bastion" {
 
   variables = {
     ansible_host = module.bastion.host.public_ip
-    ansible_user = local.ami_user
+    ansible_user = local.bastion_image.ami_user
   }
 }
