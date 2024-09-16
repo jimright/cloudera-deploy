@@ -223,6 +223,17 @@ Or use the CLI flags `--pp` or `--pull-policy` and set the value to `always`.
 
 You can read more about [updating this configuration](https://ansible.readthedocs.io/projects/navigator/settings/#pull-policy) on the `ansible-navigator` website. 
 
+# Legacy Quickstart
+
+If you must, you can run the legacy `quickstart.sh` by checking out the `v1.7.1` tag and then pinning the execution environment container to the `v1.7.4` release:
+
+```bash
+git checkout -b legacy_quickstart v1.7.1
+image_ver="v1.7.4" ./quickstart.sh
+```
+
+Please note, we are not providing any updates to this legacy code base.
+
 # Troubleshooting
 
 If you need help, here are some resources:
