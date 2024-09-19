@@ -1,0 +1,26 @@
+---
+- name: Tear down CDP Public Cloud infrastructure, Environment, and Datalake
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tags:
+    - env
+  tasks:
+    - name: Check for existing Terraform state file
+      ansible.builtin.stat:
+        path: tf-cdp-env/terraform.tfstate
+      register: __tf_state
+
+    - name: Terraform destroy to remove the CDP env & cloud infrastructure
+      cloud.terraform.terraform: 
+        project_path: "tf-cdp-env/"
+        state: "absent"
+        force_init: "{{ not __tf_state.stat.exists }}"
+
+    - name: Remove the TF input and state file for Terraform module
+      ansible.builtin.file:
+        path: "tf-cdp-env/{{ item }}"
+        state: "absent"
+      loop:
+        - terraform.tfvars
+        - terraform.tfstate
