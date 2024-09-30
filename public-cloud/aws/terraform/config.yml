@@ -16,7 +16,7 @@
 # Short prefix to append to all resources created
 name_prefix: "<ENTER_VALUE>"                         # str; keep short 4-7 characters
 
-# AWS region for the CDP Public Cloud and Peer networking
+# AWS region for the CDP Public Cloud
 infra_region:  "<ENTER_VALUE>"                       # str; e.g. (us-east-2)
 
 # CDP Environment Deployment type. Options are public, semi-private and private

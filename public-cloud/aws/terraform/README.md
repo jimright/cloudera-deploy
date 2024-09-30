@@ -1,6 +1,6 @@
 # CDP Public Cloud - Environment and Data Services Example
 
-Constructs a CDP Public Cloud Environment, Datalake and specified Data Services.
+Constructs a CDP Public Cloud Environment, Datalake and specified Data Services on AWS.
 
 > Uses the [cdp-tf-quickstarts](https://github.com/cloudera-labs/cdp-tf-quickstarts) Terraform module, called via Ansible, to generate the AWS infrastructure pre-requisite resources and the CDP environment and datalake. The [cloudera.cloud](https://github.com/cloudera-labs/cloudera.cloud) Ansible collection is used to deploy the data services.
 
@@ -68,7 +68,7 @@ ansible-navigator run setup.yml -e @./config.yml
 
 ### Terraform resource files
 
-The Terraform root module resource files run by the playbook are in the `./pbc_infra_tf/` (for cloud infrastructure deployment) `./pbc_deploy_tf/` (CDP deployment) sub-directories.
+The Terraform root module resource files run by the playbook is in the `./tf-cdp-env/` sub-directory.
 
 Standard Terraform commands - e.g. `terraform output`, `terraform console`, can be run from within these directories.
 
