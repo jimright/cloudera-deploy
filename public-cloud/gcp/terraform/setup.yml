@@ -1,0 +1,45 @@
+---
+# Copyright 2024 Cloudera, Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Set up CDP Public Cloud assets
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tags:
+    - env
+  tasks:
+
+############# CDP Environment and Datalake (via Terraform Quickstarts) #############
+
+    - name: Create TF input variables file for TF quickstart module
+      ansible.builtin.template:
+        src: cdp_env_terraform.tfvars.j2
+        dest: "tf-cdp-env/terraform.tfvars"
+
+    - name: Check for existing Terraform state file
+      ansible.builtin.stat:
+        path: tf-cdp-env/terraform.tfstate
+      register: __tf_state
+
+    - name: Terraform apply to set up the Cloud infrastructure
+      cloud.terraform.terraform: 
+        project_path: "tf-cdp-env/"
+        state: "present"
+        force_init: "{{ not __tf_state.stat.exists }}"
+        provider_upgrade: true
+
+    - name: Fetch Terraform outputs for infrastructure setup
+      ansible.builtin.set_fact:
+        tf_cdp_outputs: "{{ lookup('cloud.terraform.tf_output', project_path='tf-cdp-env') }}"
