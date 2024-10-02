@@ -55,19 +55,23 @@
             name: "{{ tf_cdp_outputs.cdp_environment_name.value }}"
           register: __env
 
+        - name: Set fact for the target environment
+          ansible.builtin.set_fact:
+            target_env: "{{ (__env.environments |  selectattr('environmentName', 'contains', cdp_env)|first) }}"
+
         - name: Extract details about the environment
           ansible.builtin.set_fact:
             __env_details: "{{ env_details }}"
           vars:
-            network_details: "{{ (__env.environments |  selectattr('environmentName', 'contains', tf_cdp_outputs.cdp_environment_name.value)|first).network | default([]) }}"
-            cloud_platform: "{{ (__env.environments |  selectattr('environmentName', 'contains', tf_cdp_outputs.cdp_environment_name.value)|first).cloudPlatform }}"
+            network_details: "{{ target_env.network | default([]) }}"
+            cloud_platform: "{{ target_env.cloudPlatform }}"
             env_details: 
-              env_name: "{{ (__env.environments |  selectattr('environmentName', 'contains', tf_cdp_outputs.cdp_environment_name.value)|first).environmentName }}"
-              crn: "{{ (__env.environments |  selectattr('environmentName', 'contains', tf_cdp_outputs.cdp_environment_name.value)|first).crn }}"
-              status: "{{ (__env.environments |  selectattr('environmentName', 'contains', tf_cdp_outputs.cdp_environment_name.value)|first).status }}"
+              env_name: "{{ target_env.environmentName }}"
+              crn: "{{ target_env.crn }}"
+              status: "{{ target_env.status }}"
               cloud_platform: "{{ cloud_platform }}"
-              region: "{{ (__env.environments |  selectattr('environmentName', 'contains', tf_cdp_outputs.cdp_environment_name.value)|first).region }}"
-              credential_name: "{{ (__env.environments |  selectattr('environmentName', 'contains', tf_cdp_outputs.cdp_environment_name.value)|first).credentialName| default(omit)}}"
+              region: "{{ target_env.region }}"
+              credential_name: "{{ target_env.credentialName| default(omit)}}"
               # network id key is cloud platform dependent
               network_id: "{{ network_details[cloud_platform | lower] | default(None) | community.general.json_query('networkId||vpcId||networkName') or omit }}"
               subnets: "{{ network_details | community.general.json_query('subnetIds') or omit }}"

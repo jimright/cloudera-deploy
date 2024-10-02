@@ -1,0 +1,376 @@
+---
+# Copyright 2024 Cloudera, Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Remove Data Services associated with the environment
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  
+  tasks:
+
+############# Environment Discovery & Validation #############
+
+    # Find details about the environment
+    - name: Discover and Validate CDP environment details
+      tags:
+        - always
+      block:
+        - name: Fetch the Environment Name from the Terraform outputs
+          ansible.builtin.set_fact:
+            cdp_env: "{{ lookup('cloud.terraform.tf_output', 'cdp_environment_name', project_path='tf-cdp-env') }}"
+
+        - name: Retrieve details of the CDP environment
+          cloudera.cloud.env_info:
+            name: "{{ cdp_env }}"
+          register: __cdp_environment_info
+
+        - name: Verify that environment is in running state
+          ansible.builtin.assert:
+            that:
+              - __cdp_environment_info.environments | length == 1
+              - __cdp_environment_info.environments[0].status == 'AVAILABLE'
+            fail_msg: "Environemt '{{ cdp_env }}' not found or not in Available state"
+
+        - name: Set fact for the target environment
+          ansible.builtin.set_fact:
+            target_env: "{{ (__cdp_environment_info.environments |  selectattr('environmentName', 'contains', cdp_env)|first) }}"
+
+        # Extract details about the environment
+        - name: Find details about __cdp_environments_to_delete
+          ansible.builtin.set_fact:
+            __env_details: "{{ env_details }}"
+          vars:
+            network_details: "{{ target_env.network | default([]) }}"
+            cloud_platform: "{{ target_env.cloudPlatform }}"
+            env_details: 
+              env_name: "{{ target_env.environmentName }}"
+              crn: "{{ target_env.crn }}"
+              status: "{{ target_env.status }}"
+              cloud_platform: "{{ cloud_platform }}"
+              region: "{{ target_env.region }}"
+              credential_name: "{{ target_env.credentialName| default(omit)}}"
+              # network id key is cloud platform dependent
+              network_id: "{{ network_details[cloud_platform | lower] | default(None) | community.general.json_query('networkId||vpcId||networkName') or omit }}"
+              subnets: "{{ network_details | community.general.json_query('subnetIds') or omit }}"
+
+########## DataHubs ############
+
+    - name: Execute DataHub teardown
+      tags:
+        - dh
+      block:
+        - name: Retrieve details of DataHubs
+          cloudera.cloud.datahub_cluster_info:
+            environment: "{{ __env_details.env_name }}"
+          register: __dh_info
+
+        - name: Delete all DataHubs associated with the environment
+          when:
+            - __dh_info.datahubs is defined
+            - __dh_info.datahubs | length > 0
+          cloudera.cloud.datahub_cluster:
+            environment: "{{ __dh_item.environmentName }}"
+            cluster_name: "{{ __dh_item.clusterName }}"
+            state: "absent"
+            wait: yes
+          loop_control:
+            loop_var: __dh_item
+            label: "{{ __dh_item.clusterName }}"
+          loop: "{{ __dh_info.datahubs }}"
+          async: 3600 # 1 hour timeout
+          poll: 0
+          register: __dh_async
+
+############# CDF #############
+
+    - name: Execute CDF teardown
+      tags:
+        - cdf
+      block:
+        - name: Retrieve details of CDF Deployment
+          cloudera.cloud.df_service_info:
+            env_crn: "{{ __env_details.crn }}"
+          register: __cdf_info
+
+        - name: Disable the CDF service
+          when:
+            - __cdf_info.services is defined
+            - __cdf_info.services | length > 0
+          cloudera.cloud.df_service:
+            df_crn: "{{ __cdf_info.services[0].crn }}"
+            persist: no
+            force: no
+            terminate: yes
+            state: absent
+            wait: yes
+          async: 3600 # 1 hour timeout
+          poll: 0
+          register: __cdf_async
+
+############# CML #############
+
+    - name: Execute CML teardown
+      tags:
+        - cml
+      block:
+        - name: Retrieve details of CML Workspaces
+          cloudera.cloud.ml_info:
+            environment: "{{ __env_details.env_name }}"
+          register: __cml_info
+        
+        - name: Disable CML workspaces
+          cloudera.cloud.ml:
+            name: "{{ __cml_item.instanceName }}"
+            environment: "{{ __env_details.env_name }}"
+            state: absent
+            force: "{{ 'no' if __cml_item.instanceStatus == 'installation:finished' else 'yes' }}"
+            wait: yes
+          loop_control:
+            loop_var: __cml_item
+            label: "{{ __cml_item.instanceName }}"
+          loop: "{{ __cml_info.workspaces }}"
+          async: 3600 # 1 hour timeout
+          poll: 0
+          register: __cml_async         
+
+############# CDW  Teardown #############
+
+
+    - name: Execute CDW teardown
+      tags:
+        - cdw
+      block:
+
+      # ** Get details about CDW service, data viz and VWs **
+      - name: Get CDW Cluster details
+        cloudera.cloud.dw_cluster_info:
+          env: "{{ __env_details.env_name }}"
+        register: __cdw_clusters
+
+      - name: Get details of all DataViz clusters in the Environment
+        block:
+          - name: Query to lookup DataViz Clusters
+            cloudera.cloud.dw_data_visualization_info:
+              env: "{{ __env_details.env_name }}"
+            register: __cdw_dataviz_clusters
+        rescue:
+          - name: Rescue - Set default empty DataViz CLuster list
+            ansible.builtin.set_fact:
+              __cdw_dataviz_clusters: []
+
+        # NOTE: For public cloud there can only be one cluster per environment
+      - name: Get details of Virtual Warehouse associated with the CDW Cluster
+        when:
+          - __cdw_clusters.clusters | length > 0
+        cloudera.cloud.dw_virtual_warehouse_info:
+          cluster_id: "{{ __cdw_clusters.clusters | map(attribute='id') | first }}"
+        register: __cdw_vws
+
+      - name: Get details of Database Catalogs associated with the CDW Cluster
+        when:
+          - __cdw_clusters.clusters | length > 0
+        cloudera.cloud.dw_database_catalog_info:
+          cluster_id: "{{ __cdw_clusters.clusters | map(attribute='id') | first }}"
+        register: __cdw_dbcs
+
+      # ** Remove data viz cluster, VWs and deactivate CDW service **
+      - name: Remove the CDW DataViz Clusters
+        when:
+          - __cdw_dataviz_clusters is defined
+          - __cdw_dataviz_clusters | length > 0
+        cloudera.cloud.dw_data_visualization:
+          env: "{{ __env_details.env_name }}"
+          name: "{{ dataviz_item }}"
+          state: absent
+        loop_control:
+          loop_var: dataviz_item
+        loop: "{{ __cdw_dataviz_clusters.data_visualizations | map(attribute='name') }}"
+
+      - name: Remove CDW Virtual Warehouses
+        when:
+          - __cdw_clusters.clusters | length > 0
+          - __cdw_vws is defined          
+        cloudera.cloud.dw_virtual_warehouse:
+          cluster_id: "{{ __cdw_clusters.clusters | map(attribute='id') | first }}"
+          warehouse_id: "{{ cdw_vw_item }}"
+          state: absent
+        loop_control:
+          loop_var: cdw_vw_item
+        loop: "{{ __cdw_vws.virtual_warehouses | map(attribute='id') }}"
+      
+      - name: Remove CDW Database Catalogs
+        ignore_errors: True # NOTE: It's not possible to remove the default DBC, so ignoring errors
+        when:
+          - __cdw_clusters.clusters | length > 0
+          - __cdw_dbcs is defined          
+        cloudera.cloud.dw_database_catalog:
+          cluster_id: "{{ __cdw_clusters.clusters | map(attribute='id') | first }}"
+          id: "{{ cdw_dbc_item }}"
+          state: absent
+        loop_control:
+          loop_var: cdw_dbc_item
+        loop: "{{ __cdw_dbcs.database_catalogs | map(attribute='id') }}"
+
+      - name: Deactivate the CDW clusters
+        cloudera.cloud.dw_cluster:
+          env_crn: "{{ __env_details.crn }}"
+          cluster_id: "{{ cdw_cluster_item }}"
+          state: absent
+        loop_control:
+          loop_var: cdw_cluster_item
+        loop: "{{ __cdw_clusters.clusters | map(attribute='id') }}"
+        async: 3600 # 1 hour timeout
+        poll: 0        
+        register: __cdw_async
+
+############# CDE #############
+
+    - name: Execute CDE teardown
+      tags:
+        - cde
+      block:
+        # ** Get details about CDE service and VCs **
+        - name: Retrieve details of CDE services
+          cloudera.cloud.de_info:
+            environment: "{{ __env_details.env_name }}"
+          register: __cde_info
+        
+        - name: Get details of Virtual Clusters associated with the CDE service
+          # when:
+          #   - __cde_info.services | length > 0
+          cloudera.cloud.de_virtual_cluster_info:
+            environment: "{{ __env_details.env_name }}"
+            service_name: "{{ __cde_item.name }}"
+          register: __cde_vcs
+          loop_control:
+            loop_var: __cde_item
+            label: "{{ __cde_item.name }}"
+          loop: "{{ __cde_info.services }}"
+
+        # ** Remove virtual clusters and disable CDE service **
+        - name: Delete the CDE Virtual Clusters
+          cloudera.cloud.de_virtual_cluster:
+            environment: "{{ __env_details.env_name }}"
+            cluster_name: "{{ item.0.__cde_item.name }}"
+            name: "{{ item.1.vcName }}"
+            state: absent
+          with_subelements:
+            - "{{ __cde_vcs.results }}"
+            - vcs
+
+        - name: Disable CDE services
+          cloudera.cloud.de:
+            name: "{{ __cde_item.name }}"
+            environment: "{{ __env_details.env_name }}"
+            state: absent
+            wait: yes
+          loop_control:
+            loop_var: __cde_item
+            label: "{{ __cde_item.name }}"
+          loop: "{{ __cde_info.services }}"
+          async: 3600 # 1 hour timeout
+          poll: 0        
+          register: __cde_async
+
+############# DataHubs - Wait #############
+
+    - name: Monitor the delete of DataHubs
+      when:
+        - __dh_async is defined
+        - __dh_async.results is defined
+        - __dh_async.results | length > 0
+      ansible.builtin.async_status:
+        jid: "{{ __teardown.ansible_job_id }}"
+      loop_control:
+        loop_var: __teardown
+        label: "{{ __teardown.__dh_item.clusterName | default('Unknown') }}"
+      loop: "{{ __dh_async.results }}"
+      register: __teardown_async
+      until: __teardown_async.finished
+      retries: 120
+      delay: 30
+      tags:
+        - dh
+
+############# CDF - Wait #############
+    - name: Monitor the delete of CDF Service
+      when:
+        - __cdf_async is defined
+        - __cdf_async.ansible_job_id is defined
+      ansible.builtin.async_status:
+        jid: "{{ __cdf_async.ansible_job_id }}"
+      register: __teardown_async
+      until: __teardown_async.finished
+      retries: 120
+      delay: 30
+      tags:
+        - cdf
+
+############# CML - Wait #############
+    - name: Monitor the delete of the CML workspaces
+      when:
+        - __cml_async is defined
+        - __cml_async.results is defined
+        - __cml_async.results | length > 0
+      ansible.builtin.async_status:
+        jid: "{{ __teardown.ansible_job_id }}"
+      loop_control:
+        loop_var: __teardown
+        label: "{{ __teardown.__cml_item.instanceName | default('Unknown') }}"
+      loop: "{{ __cml_async.results }}"
+      register: __teardown_async
+      until: __teardown_async.finished
+      retries: 120
+      delay: 30
+      tags:
+        - cml
+
+############# CDW - Wait #############
+    - name: Monitor the delete of CDW Service
+      when:
+        - __cdw_async is defined
+        - __cdw_async.results is defined
+        - __cdw_async.results | length > 0        
+      ansible.builtin.async_status:
+        jid: "{{ __teardown.ansible_job_id }}"
+      loop_control:
+        loop_var: __teardown
+        label: "{{ __teardown.cdw_cluster_item | default('Unknown') }}"
+      loop: "{{ __cdw_async.results }}"
+      register: __teardown_async
+      until: __teardown_async.finished
+      retries: 120
+      delay: 30
+      tags:
+        - cdw
+
+############# CDE - Wait #############
+    - name: Monitor the delete of the CDE services
+      when:
+        - __cde_async is defined
+        - __cde_async.results is defined
+        - __cde_async.results | length > 0
+      ansible.builtin.async_status:
+        jid: "{{ __teardown.ansible_job_id }}"
+      loop_control:
+        loop_var: __teardown
+        label: "{{ __teardown.__cde_item.name | default('Unknown') }}"
+      loop: "{{ __cde_async.results }}"
+      register: __teardown_async
+      until: __teardown_async.finished
+      retries: 120
+      delay: 30
+      tags:
+        - cde

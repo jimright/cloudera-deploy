@@ -1,0 +1,91 @@
+---
+# Copyright 2024 Cloudera, Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Short prefix to append to all resources created
+name_prefix: "<ENTER_VALUE>"                         # str; keep short 4-7 characters
+
+# Azure region for the CDP Public Cloud
+infra_region:  "<ENTER_VALUE>"                       # str; e.g. (eastus)
+
+# CDP Environment Deployment type. Options are public, semi-private and private
+deployment_template: public  
+
+# Tags to apply to resources, examples shown below
+# tags:
+#   owner: "<ENTER_VALUE>"
+#   project: "<ENTER_VALUE>"
+#   enddate: "<ENTER_VALUE>"
+
+# Limit UI and SSH access to the caller/controller
+# Edit with list of CIDRs if access required from other endpoints
+allowed_cidrs: "{{ lookup('ansible.builtin.url', 'https://api.ipify.org', wantlist=True) | product(['32']) | map('join', '/') | list }}"
+
+# Network connectivity
+ingress_extra_cidrs_and_ports:
+  cidrs: "{{ allowed_cidrs }}"
+  ports: [22, 443]      # Cloud-only access
+
+# Data Services to enable
+enable_cdf: False
+enable_cml: False
+enable_cdw: False
+enable_cde: False
+
+# Data Flow Configurations
+df:
+  nodes_min: 3
+  nodes_max: 20
+  public_loadbalancer: yes
+  loadbalancer_ip_ranges: "{{ ingress_extra_cidrs_and_ports.cidrs }}"
+  k8s_ip_ranges: "{{ ingress_extra_cidrs_and_ports.cidrs }}"
+
+# ML workspace definition
+ml:
+  definitions:
+    - name: "{{ name_prefix }}-default-ml"
+      tls: yes
+      governance: yes
+      metrics: yes
+      monitoring: yes
+      private_cluster: no
+      public_loadbalancer: yes
+      instance_groups:
+        - name: cpu_settings
+          instanceCount: 1
+          instanceType: "m5.2xlarge"
+          instanceTier: "ON_DEMAND"
+          autoscaling:
+            minInstances: 1
+            maxInstances: 3
+            enabled: yes
+          rootVolume:
+            size: 300
+
+# Data Warehouse Service
+dw:
+  private_loadbalancer: no
+  public_worker_node: yes
+  overlay: yes
+
+# Data Engineering Service
+de:
+  definitions:
+    - name: "{{ name_prefix }}-sandbox-default-de"
+      instanceType: "m5.4xlarge"
+      private_cluster: no
+      public_loadbalancer: yes
+      workload_analytics: yes
+      k8s_ip_ranges: "{{ infra.ingress_extra_cidrs_and_ports.cidrs }}"
+      loadbalancer_ip_ranges: "{{ infra.ingress_extra_cidrs_and_ports.cidrs }}"

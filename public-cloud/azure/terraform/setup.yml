@@ -1,0 +1,251 @@
+---
+# Copyright 2024 Cloudera, Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Set up CDP Public Cloud assets
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tags:
+    - env
+  tasks:
+
+############# CDP Environment and Datalake (via Terraform Quickstarts) #############
+
+    - name: Create TF input variables file for TF quickstart module
+      ansible.builtin.template:
+        src: cdp_env_terraform.tfvars.j2
+        dest: "tf-cdp-env/terraform.tfvars"
+
+    - name: Check for existing Terraform state file
+      ansible.builtin.stat:
+        path: tf-cdp-env/terraform.tfstate
+      register: __tf_state
+
+    - name: Terraform apply to set up the Cloud infrastructure
+      cloud.terraform.terraform: 
+        project_path: "tf-cdp-env/"
+        state: "present"
+        force_init: "{{ not __tf_state.stat.exists }}"
+        provider_upgrade: true
+
+    - name: Fetch Terraform outputs for infrastructure setup
+      ansible.builtin.set_fact:
+        tf_cdp_outputs: "{{ lookup('cloud.terraform.tf_output', project_path='tf-cdp-env') }}"
+
+# ############# Enable Data Services as required #############
+
+    # - name: Gather details about the CDP environment
+    #   tags:
+    #     - always
+    #   block:
+    #     - name: Query for the CDP Public Cloud Environment
+    #       cloudera.cloud.env_info:
+    #         name: "{{ tf_cdp_outputs.cdp_environment_name.value }}"
+    #       register: __env
+
+    #     - name: Set fact for the target environment
+    #       ansible.builtin.set_fact:
+    #         target_env: "{{ (__env.environments |  selectattr('environmentName', 'contains', cdp_env)|first) }}"
+
+    #     - name: Extract details about the environment
+    #       ansible.builtin.set_fact:
+    #         __env_details: "{{ env_details }}"
+    #       vars:
+    #         network_details: "{{ target_env.network | default([]) }}"
+    #         cloud_platform: "{{ target_env.cloudPlatform }}"
+    #         env_details: 
+    #           env_name: "{{ target_env.environmentName }}"
+    #           crn: "{{ target_env.crn }}"
+    #           status: "{{ target_env.status }}"
+    #           cloud_platform: "{{ cloud_platform }}"
+    #           region: "{{ target_env.region }}"
+    #           credential_name: "{{ target_env.credentialName| default(omit)}}"
+    #           # network id key is cloud platform dependent
+    #           network_id: "{{ network_details[cloud_platform | lower] | default(None) | community.general.json_query('networkId||vpcId||networkName') or omit }}"
+    #           subnets: "{{ network_details | community.general.json_query('subnetIds') or omit }}"
+
+# # ** CDF - Start
+
+#     - name: Start enable of up CDF service
+#       when: 
+#         - enable_cdf
+#         - df is defined
+#       cloudera.cloud.df_service:
+#         state: present
+#         env_crn: "{{ __env_details.crn }}"
+#         nodes_min: "{{ df.nodes_min | default(omit) }}"
+#         nodes_max: "{{ df.nodes_max | default(omit) }}"
+#         public_loadbalancer: "{{ df.public_loadbalancer | default(omit) }}"
+#         cluster_subnets_filter: "{{ df.cluster_subnets_filter | default(omit) }}"
+#         cluster_subnets: "{{ __env_details.subnets if  df.cluster_subnets_filter is not defined else omit  }}"
+#         k8s_ip_ranges: "{{ df.k8s_ip_ranges | default(omit) }}"
+#         loadbalancer_subnets_filter: "{{ df.loadbalancer_subnets_filter | default(omit) }}"
+#         loadbalancer_subnets: "{{ __env_details.subnets if  ((df.loadbalancer_subnets_filter is not defined) and (__env_details.cloud_platform != 'AZURE')) else omit  }}"
+#         loadbalancer_ip_ranges: "{{ df.loadbalancer_ip_ranges | default(omit) }}"
+#         wait: true
+#       async: 3600 # 1 hour timeout
+#       poll: 0
+#       register: __cdf_async
+#       tags:
+#         - cdf
+
+# # ** CML - Start
+
+#     - name: Start enable of up CML workspaces
+#       when: 
+#         - enable_cml
+#         - ml is defined
+#         - ml.definitions | length > 0
+#       cloudera.cloud.ml:
+#         state: present
+#         name: "{{ __cml_item.name }}"
+#         env: "{{ __env_details.env_name }}"
+#         governance: "{{ __cml_item.governance }}"
+#         metrics: "{{ __cml_item.metrics }}"
+#         monitoring: "{{ __cml_item.monitoring }}"
+#         private_cluster: "{{ __cml_item.private_cluster | default(omit) }}"
+#         nfs:  "{{ azure_nfs_file_share_url if __env_details.cloud_platform == 'AZURE' else omit  }}"
+#         nfs_version: "{{ '4.1' if __env_details.cloud_platform == 'AZURE' else omit  }}"
+#         public_loadbalancer: "{{ __cml_item.public_loadbalancer | default(omit) }}"
+#         k8s_request:
+#           environmentName: "{{ __env_details.env_name }}"
+#           instanceGroups: "{{ __cml_item.instance_groups }}"
+#         debug: true
+#       loop_control:
+#         loop_var: __cml_item
+#         label: "{{ __cml_item.name }}"
+#       loop: "{{ ml.definitions }}"
+#       async: 3600 # 1 hour timeout
+#       poll: 0
+#       register: __cml_async
+#       tags:
+#         - cml
+
+# # ** CDW - Start
+#     - name: Start setup of CDW service - AWS
+#       when:
+#         - enable_cdw
+#         - dw is defined
+#         # - __env_details.cloud_platform | lower == 'aws'
+#       cloudera.cloud.dw_cluster:
+#         env_crn: "{{ __env_details.crn }}"
+#         aws_lb_subnets: "{{ __env_details.subnets }}"
+#         aws_worker_subnets: "{{ __env_details.subnets }}"
+#         private_load_balancer: "{{ dw.private_loadbalancer | default(omit) }}"
+#         public_worker_node: "{{ dw.public_worker_node | default(omit) }}"
+#         overlay: "{{ dw.overlay | default(omit) }}"
+#         state: present
+#         wait: true
+#       async: 3600 # 1 hour timeout
+#       poll: 0        
+#       register: __cdw_aws_async
+#       tags:
+#         - cdw
+
+# # ** CDE - Start
+
+#     - name: Start setup of CDE service
+#       when:
+#         - enable_cde
+#         - de is defined
+#       cloudera.cloud.de:
+#         state: present
+#         env: "{{ __env_details.env_name }}"
+#         name: "{{ __cde_item.name }}"
+#         instance_type: "{{ __cde_item.instanceType }}"
+#         enable_private_network: "{{ __cde_item.private_cluster }}"
+#         enable_public_endpoint: "{{ __cde_item.public_loadbalancer }}" 
+#         enable_workload_analytics: "{{ __cde_item.workload_analytics }}"
+#         whitelist_ips: "{{ __cde_item.k8s_ip_ranges }}"
+#         loadbalancer_ips: "{{ __cde_item.loadbalancer_ip_ranges }}"
+#         wait: yes
+#       loop_control:
+#         loop_var: __cde_item
+#         label: "{{ __cde_item.name }}"
+#       loop: "{{ de.definitions }}"
+#       async: 3600 # 1 hour timeout
+#       poll: 0
+#       register: __cde_async
+#       tags:
+#         - cde
+
+# # ** CDF - Wait
+#     - name: Monitor the setup of CDF Service
+#       when:
+#         - enable_cdf
+#         - __cdf_async is defined
+#       ansible.builtin.async_status:
+#         jid: "{{ __cdf_async.ansible_job_id }}"
+#       register: __setups_async
+#       until: __setups_async.finished
+#       retries: 120
+#       delay: 30
+#       tags:
+#         - cdf
+
+# # ** CML - Wait
+#     - name: Monitor the set up of the CML
+#       when:
+#         - enable_cml
+#         - __cml_async is defined
+#         - __cml_async.results is defined
+#         - __cml_async.results | length > 0
+#       ansible.builtin.async_status:
+#         jid: "{{ __setup.ansible_job_id }}"
+#       loop_control:
+#         loop_var: __setup
+#         label: "{{ __setup.__cml_item.name | default('Unknown') }}"
+#       loop: "{{ __cml_async.results }}"
+#       register: __setups_async
+#       until: __setups_async.finished
+#       retries: 120
+#       delay: 30
+#       tags:
+#         - cml
+
+# # ** CDW - Wait
+#     - name: Monitor the setup of CDW Service - AWS
+#       when:
+#         - enable_cdw            
+#         - __cdw_aws_async is defined
+#         - __env_details.cloud_platform | lower == 'aws'
+#       ansible.builtin.async_status:
+#         jid: "{{ __cdw_aws_async.ansible_job_id }}"
+#       register: __setups_async
+#       until: __setups_async.finished
+#       retries: 120
+#       delay: 30
+#       tags:
+#         - cdw
+
+# # ** CDE - Wait
+#     - name: Monitor the set up of the CDE
+#       when:
+#         - enable_cde      
+#         - __cde_async is defined
+#         - __cde_async.results is defined
+#         - __cde_async.results | length > 0
+#       ansible.builtin.async_status:
+#         jid: "{{ __setup.ansible_job_id }}"
+#       loop_control:
+#         loop_var: __setup
+#         label: "{{ __setup.__cde_item.name | default('Unknown') }}"
+#       loop: "{{ __cde_async.results }}"
+#       register: __setups_async
+#       until: __setups_async.finished
+#       retries: 120
+#       delay: 30
+#       tags:
+#         - cde
