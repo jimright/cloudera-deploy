@@ -57,7 +57,7 @@
 
         - name: Set fact for the target environment
           ansible.builtin.set_fact:
-            target_env: "{{ (__env.environments |  selectattr('environmentName', 'contains', cdp_env)|first) }}"
+            target_env: "{{ (__env.environments |  selectattr('environmentName', 'contains', tf_cdp_outputs.cdp_environment_name.value)|first) }}"
 
         - name: Extract details about the environment
           ansible.builtin.set_fact:
